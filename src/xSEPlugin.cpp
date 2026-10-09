@@ -24,6 +24,7 @@ namespace {
 					GTS::EventDispatcher::DoDataReady();
 					GTS::CPrintPluginInfo();
 					Hooks::InstallSMPBridge();
+					Hooks::ReportSkippedHooks();
 					break;
 				}
 

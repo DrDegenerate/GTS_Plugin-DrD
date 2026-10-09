@@ -5,6 +5,10 @@ vcpkg_from_github(
     REF 9d252878efe8e8e9f14f6a378f7f87a8dc7af0ce
     SHA512 0d62b5458ec6be8ab104bc02736a1dbce0bb3e26b3f5e3ecd8272c297e9a8979eefacfcee606c107eb9f67a9f1734ce8d934f137d39d1e163f91c1afd72cf6cf
     HEAD_REF master-3.6
+    PATCHES
+        # Skyrim 1.7.99/1.7.104: Address Library format 5, 1.7.x runtime detection,
+        # SKSE Address Library v5 flag, PlayerCharacter/SkyrimVM layout shifts, changed IDs.
+        0001-skyrim-1.7.104-support.patch
 )
 
 vcpkg_configure_cmake(

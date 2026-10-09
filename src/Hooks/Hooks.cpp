@@ -1,4 +1,5 @@
 #include "Hooks/Hooks.hpp"
+#include "Hooks/Util/HookUtil.hpp"
 
 #include "Experiments/Experiments.hpp"
 
@@ -91,5 +92,29 @@ namespace Hooks {
 		logger::info("Finished applying hooks");
 		logger::info("Default Trampoline Used: {}/{} Bytes", SKSETrampoline.allocated_size(), SKSETrampoline.capacity());
 
+		if (const auto& skipped = Internal::SkippedHooks(); !skipped.empty()) {
+			logger::critical("{} hook(s) were NOT installed on Skyrim {}:", skipped.size(), REL::Module::get().version().string("."));
+			for (const auto& name : skipped) {
+				logger::critical("  - {}", name);
+			}
+		}
+	}
+
+	void ReportSkippedHooks() {
+		const auto& skipped = Internal::SkippedHooks();
+		if (skipped.empty()) {
+			return;
+		}
+
+		std::string message = fmt::format(
+			"Size Matters (GtsPlugin.dll): {} hook(s) could not be installed on Skyrim {} because the game's code "
+			"is different from what they expect. The related features will not work:\n\n",
+			skipped.size(), REL::Module::get().version().string("."));
+		for (const auto& name : skipped) {
+			message += name;
+			message += "\n";
+		}
+		message += "\nDetails are in GtsPlugin.log.";
+		RE::DebugMessageBox(message.c_str());
 	}
 }

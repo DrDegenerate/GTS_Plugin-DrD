@@ -21,6 +21,63 @@ namespace Hooks::Internal {
 			return p.substr(start, end - start);
 		#endif
 	}
+
+	// Picks the AE offset for a hook site that moved in Skyrim 1.7.99.
+	inline std::size_t AEOffset(std::size_t a_pre1799, std::size_t a_1799) {
+		return REL::Module::get().version() >= SKSE::RUNTIME_SSE_1_7_99 ? a_1799 : a_pre1799;
+	}
+
+	// Names of call/jump hooks that were skipped because the game's code did not match.
+	inline std::vector<std::string>& SkippedHooks() {
+		static std::vector<std::string> skipped;
+		return skipped;
+	}
+
+	// Skyrim updates can move code around inside a function (1.7.99 did for several of the
+	// functions GTS patches). Before writing a call/jump hook, make sure the bytes at the target
+	// are still the instruction the hook was written for. Writing over anything else corrupts
+	// the game's code and crashes later in an unrelated place, so a mismatch skips the hook.
+	inline bool IsExpectedPatchSite(std::uintptr_t a_address, std::size_t a_size, bool a_isCall, std::string_view a_hookName) {
+		const auto* code = reinterpret_cast<const std::uint8_t*>(a_address);
+
+		const auto& gameModule = REL::Module::get();
+		const auto base = gameModule.base();
+		const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+		const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+		const auto imageEnd = base + nt->OptionalHeader.SizeOfImage;
+
+		bool matches = true;
+		if (a_size == 5) {
+			// call rel32 (E8); a branch hook may replace either a call or a jmp rel32 (E9)
+			matches = code[0] == 0xE8 || (!a_isCall && code[0] == 0xE9);
+			if (matches) {
+				// Log where the call currently goes. Another DLL may already have redirected it to its
+				// own trampoline, which is fine; this is only here to make version checks easier.
+				std::int32_t rel = 0;
+				std::memcpy(&rel, code + 1, sizeof(rel));
+				const auto target = a_address + 5 + static_cast<std::intptr_t>(rel);
+				const bool inGame = target >= base && target < imageEnd;
+				logger::debug("Hook {} site SkyrimSE.exe+0x{:X} calls 0x{:X}{}", a_hookName, a_address - base,
+					inGame ? target - base : target, inGame ? " (SkyrimSE.exe RVA)" : " (outside SkyrimSE.exe, already hooked)");
+			}
+		}
+		else if (a_size == 6) {
+			// call/jmp qword ptr [rip+disp32] (FF 15 / FF 25)
+			matches = code[0] == 0xFF && code[1] == (a_isCall ? 0x15 : 0x25);
+		}
+
+		if (!matches) {
+			const auto rva = a_address - base;
+			logger::critical(
+				"Hook {} NOT installed: expected a {}-byte {} at SkyrimSE.exe+0x{:X} but found {:02X} {:02X} {:02X} {:02X} {:02X} {:02X}. "
+				"Skyrim {} moved the code inside this function, so this hook's offset must be updated.",
+				a_hookName, a_size, a_isCall ? "call" : "jump", rva,
+				code[0], code[1], code[2], code[3], code[4], code[5],
+				gameModule.version().string("."));
+			SkippedHooks().emplace_back(a_hookName);
+		}
+		return matches;
+	}
 }
 
 namespace Hooks::stl {
@@ -38,6 +95,10 @@ namespace Hooks::stl {
 		logger::debug("Installing write_call<{}> at address: 0x{:X}",
 			Internal::get_type_name<T>(), a_src
 		);
+
+		if (!Internal::IsExpectedPatchSite(a_src, Size, true, Internal::get_type_name<T>())) {
+			return;
+		}
 
 		auto& trampoline = SKSE::GetTrampoline();
 		if constexpr (Size == 6) {
@@ -64,6 +125,10 @@ namespace Hooks::stl {
 		logger::debug("Installing write_call<{}> at VariantID [0x{:X} + 0x{:X}] resolved to 0x{:X}",
 			Internal::get_type_name<T>(), a_varId.address(), a_Offs.offset(), address
 		);
+
+		if (!Internal::IsExpectedPatchSite(address, Size, true, Internal::get_type_name<T>())) {
+			return;
+		}
 
 		auto& trampoline = SKSE::GetTrampoline();
 		if constexpr (Size == 6) {
@@ -92,6 +157,10 @@ namespace Hooks::stl {
 		logger::debug("Installing write_call_unique<{}> at VariantID [0x{:X} + 0x{:X}] resolved to 0x{:X} ID {}",
 			Internal::get_type_name<T>(), a_varId.address(), a_Offs.offset(), address, ID
 		);
+		if (!Internal::IsExpectedPatchSite(address, Size, true, Internal::get_type_name<T>())) {
+			return;
+		}
+
 		auto& trampoline = SKSE::GetTrampoline();
 		if constexpr (Size == 6) {
 			T::template func<ID> = *reinterpret_cast<uintptr_t*>(trampoline.write_call<6>(address, T::template thunk<ID>));
@@ -119,6 +188,10 @@ namespace Hooks::stl {
 			Internal::get_type_name<T>(), a_RelId.id(), a_RelId.address(), a_Offs.offset(), address, ID
 		);
 
+		if (!Internal::IsExpectedPatchSite(address, Size, true, Internal::get_type_name<T>())) {
+			return;
+		}
+
 		auto& trampoline = SKSE::GetTrampoline();
 		if constexpr (Size == 6) {
 			T::template func<ID> = *reinterpret_cast<uintptr_t*>(trampoline.write_call<6>(address, T::template thunk<ID>));
@@ -145,6 +218,10 @@ namespace Hooks::stl {
 		logger::debug("Installing write_call<{}> at RelocationID({}) [0x{} + 0x{:X}] resolved to 0x{:X}",
 			Internal::get_type_name<T>(), a_RelId.id(), a_RelId.address(), a_Offs.offset(), address
 		);
+
+		if (!Internal::IsExpectedPatchSite(address, Size, true, Internal::get_type_name<T>())) {
+			return;
+		}
 
 		auto& trampoline = SKSE::GetTrampoline();
 		if (Size == 6) {
@@ -175,6 +252,10 @@ namespace Hooks::stl {
 			Internal::get_type_name<T>(), a_src
 		);
 
+		if (!Internal::IsExpectedPatchSite(a_src, Size, false, Internal::get_type_name<T>())) {
+			return;
+		}
+
 		auto& trampoline = SKSE::GetTrampoline();
 		T::func = trampoline.write_branch<Size>(a_src, T::thunk);
 
@@ -196,6 +277,10 @@ namespace Hooks::stl {
 		logger::debug("Installing write_jmp<{}> at RelocationID([]) [0x{:X} + 0x{:X}] resolved to 0x{:X}",
 			Internal::get_type_name<T>(), a_RelId.id(), a_RelId.address(), a_RelId.offset(), address
 		);
+
+		if (!Internal::IsExpectedPatchSite(address, Size, false, Internal::get_type_name<T>())) {
+			return;
+		}
 
 		auto& trampoline = SKSE::GetTrampoline();
 		T::func = trampoline.write_branch<Size>(address, T::thunk);

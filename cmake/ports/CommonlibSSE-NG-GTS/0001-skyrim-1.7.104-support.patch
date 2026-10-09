@@ -1,0 +1,715 @@
+From 2414b9f91e93d7fae113c75feda0cbbf07a9863b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Fri, 9 Oct 2026 01:47:47 -0700
+Subject: [PATCH] Support Skyrim 1.7.99/1.7.104
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01UBGJ2aJAKBnZy28RYemujG
+---
+ include/RE/B/BGSDefaultObjectManager.h |  5 +-
+ include/RE/Offsets.h                   |  2 +-
+ include/RE/P/PlayerCharacter.h         | 42 +++++++-----
+ include/RE/S/SkyrimVM.h                | 16 ++++-
+ include/REL/Relocation.h               | 87 ++++++++++++++++++------
+ include/SKSE/Interfaces.h              | 11 ++-
+ include/SKSE/Version.h                 |  4 +-
+ src/RE/B/BGSDefaultObjectManager.cpp   | 12 +++-
+ src/RE/P/PlayerCharacter.cpp           | 16 ++---
+ src/RE/S/Script.cpp                    |  5 +-
+ src/RE/S/SkyrimVM.cpp                  |  2 +-
+ src/RE/T/TES.cpp                       |  5 +-
+ src/RE/V/VirtualMachine.cpp            |  2 +-
+ src/REL/Relocation.cpp                 | 94 ++++++++++++++++++++++++++
+ 14 files changed, 245 insertions(+), 58 deletions(-)
+
+diff --git a/include/RE/B/BGSDefaultObjectManager.h b/include/RE/B/BGSDefaultObjectManager.h
+index 7623ebe3..6602a9de 100644
+--- a/include/RE/B/BGSDefaultObjectManager.h
++++ b/include/RE/B/BGSDefaultObjectManager.h
+@@ -3,6 +3,7 @@
+ #include "RE/B/BSTSingleton.h"
+ #include "RE/F/FormTypes.h"
+ #include "RE/T/TESForm.h"
++#include "SKSE/Version.h"
+ 
+ namespace RE
+ {
+@@ -1052,7 +1053,9 @@ namespace RE
+ 
+ 		[[nodiscard]] bool IsObjectInitialized(std::size_t a_idx) const noexcept
+ 		{
+-			return (&REL::RelocateMember<bool>(this, 0xB80, 0xBA8))[a_idx];
++			// 1.7.99 has 372 default objects instead of 364, so the init flags start 0x40 later.
++			const std::ptrdiff_t initFlags = REL::Module::get().version() >= SKSE::RUNTIME_SSE_1_7_99 ? 0xBC0 : 0xB80;
++			return (&REL::RelocateMember<bool>(this, initFlags, 0xBA8))[a_idx];
+ 		}
+ 
+ 		[[nodiscard]] static bool SupportsVR(DefaultObjectID a_object) noexcept;
+diff --git a/include/RE/Offsets.h b/include/RE/Offsets.h
+index c1b44ecb..245115ad 100644
+--- a/include/RE/Offsets.h
++++ b/include/RE/Offsets.h
+@@ -152,7 +152,7 @@ namespace RE::Offset
+ 
+ 	namespace Console
+ 	{
+-		constexpr auto SelectedRef = RELOCATION_ID(519394, 405935);
++		constexpr auto SelectedRef = RELOCATION_ID(519394, 504099);  // 405935 before 1.6.1130
+ 		constexpr auto SetSelectedRef = RELOCATION_ID(50164, 51093);
+ 	}
+ 
+diff --git a/include/RE/P/PlayerCharacter.h b/include/RE/P/PlayerCharacter.h
+index 3f5e8465..ceaf2d0e 100644
+--- a/include/RE/P/PlayerCharacter.h
++++ b/include/RE/P/PlayerCharacter.h
+@@ -494,28 +494,38 @@ namespace RE
+ 		void                     StartGrabObject();
+ 		void                     UpdateCrosshairs();
+ 
++		// Skyrim 1.7.99 added a BSTEventSink<BSSystemEvent> base at 0x2D8 (AE layout), which moves every
++		// base class and member after it 8 bytes further. Pass the 1.6.629-1.6.1170 AE offset.
++		static constexpr std::ptrdiff_t kAE1799ShiftBytes = 0x8;
++
++		[[nodiscard]] static std::ptrdiff_t AE1799(std::ptrdiff_t a_aeOffset) noexcept {
++			return REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_7_99) != std::strong_ordering::less ?
++			           a_aeOffset + kAE1799ShiftBytes :
++			           a_aeOffset;
++		}
++
+ 		[[nodiscard]] inline BSTEventSource<BGSActorCellEvent>* AsBGSActorCellEventSource() noexcept {
+-			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorCellEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x2D0, 0x2D8);
++			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorCellEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x2D0, AE1799(0x2D8));
+ 		}
+ 
+ 		[[nodiscard]] inline const BSTEventSource<BGSActorCellEvent>* AsBGSActorCellEventSource() const noexcept {
+-			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorCellEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x2D0, 0x2D8);
++			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorCellEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x2D0, AE1799(0x2D8));
+ 		}
+ 
+ 		[[nodiscard]] inline BSTEventSource<BGSActorDeathEvent>* AsBGSActorDeathEventSource() noexcept {
+-			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorDeathEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x328, 0x330);
++			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorDeathEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x328, AE1799(0x330));
+ 		}
+ 
+ 		[[nodiscard]] inline const BSTEventSource<BGSActorDeathEvent>* AsBGSActorDeathEventSource() const noexcept {
+-			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorDeathEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x2D0, 0x330);
++			return &REL::RelocateMemberIfNewer<BSTEventSource<BGSActorDeathEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x328, AE1799(0x330));
+ 		}
+ 
+ 		[[nodiscard]] inline BSTEventSource<PositionPlayerEvent>* AsPositionPlayerEventSource() noexcept {
+-			return &REL::RelocateMemberIfNewer<BSTEventSource<PositionPlayerEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x380, 0x388);
++			return &REL::RelocateMemberIfNewer<BSTEventSource<PositionPlayerEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x380, AE1799(0x388));
+ 		}
+ 
+ 		[[nodiscard]] inline const BSTEventSource<PositionPlayerEvent>* AsPositionPlayerEventSource() const noexcept {
+-			return &REL::RelocateMemberIfNewer<BSTEventSource<PositionPlayerEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x380, 0x388);
++			return &REL::RelocateMemberIfNewer<BSTEventSource<PositionPlayerEvent>>(SKSE::RUNTIME_SSE_1_6_629, this, 0x380, AE1799(0x388));
+ 		}
+ 
+ 		[[nodiscard]] inline BSTEventSink<MenuOpenCloseEvent>* AsMenuOpenCloseEventSink() noexcept {
+@@ -722,19 +732,19 @@ namespace RE
+ 
+ 		[[nodiscard]] inline PLAYER_RUNTIME_DATA& GetPlayerRuntimeData() noexcept
+ 		{
+-			return REL::RelocateMemberIfNewer<PLAYER_RUNTIME_DATA>(SKSE::RUNTIME_SSE_1_6_629, this, 0x3D8, 0x3E0);
++			return REL::RelocateMemberIfNewer<PLAYER_RUNTIME_DATA>(SKSE::RUNTIME_SSE_1_6_629, this, 0x3D8, AE1799(0x3E0));
+ 		}
+ 
+ 		[[nodiscard]] inline const PLAYER_RUNTIME_DATA& GetPlayerRuntimeData() const noexcept
+ 		{
+-			return REL::RelocateMemberIfNewer<PLAYER_RUNTIME_DATA>(SKSE::RUNTIME_SSE_1_6_629, this, 0x3D8, 0x3E0);
++			return REL::RelocateMemberIfNewer<PLAYER_RUNTIME_DATA>(SKSE::RUNTIME_SSE_1_6_629, this, 0x3D8, AE1799(0x3E0));
+ 		}
+ 
+ 		[[nodiscard]] inline CrimeValue& GetCrimeValue() noexcept
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<CrimeValue>(this, 0x3E8);
++					return REL::RelocateMember<CrimeValue>(this, AE1799(0x3E8));
+ 				}
+ 			}
+ 			return REL::RelocateMember<CrimeValue>(this, 0x3E0, 0x9D0);
+@@ -744,7 +754,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<CrimeValue>(this, 0x3E8);
++					return REL::RelocateMember<CrimeValue>(this, AE1799(0x3E8));
+ 				}
+ 			}
+ 			return REL::RelocateMember<CrimeValue>(this, 0x3E0, 0x9D0);
+@@ -754,7 +764,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<RaceData>(this, 0xB38);
++					return REL::RelocateMember<RaceData>(this, AE1799(0xB38));
+ 				}
+ 			}
+ 			return REL::RelocateMember<RaceData>(this, 0xB30, 0x1228);
+@@ -764,7 +774,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<RaceData>(this, 0xB38);
++					return REL::RelocateMember<RaceData>(this, AE1799(0xB38));
+ 				}
+ 			}
+ 			return REL::RelocateMember<RaceData>(this, 0xB30, 0x1228);
+@@ -774,7 +784,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<GameStateData>(this, 0xB00);
++					return REL::RelocateMember<GameStateData>(this, AE1799(0xB00));
+ 				}
+ 			}
+ 			return REL::RelocateMember<GameStateData>(this, 0xAF8, 0x11F4);
+@@ -784,7 +794,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<GameStateData>(this, 0xB00);
++					return REL::RelocateMember<GameStateData>(this, AE1799(0xB00));
+ 				}
+ 			}
+ 			return REL::RelocateMember<GameStateData>(this, 0xAF8, 0x11F4);
+@@ -794,7 +804,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<INFO_RUNTIME_DATA>(this, 0x8D8);
++					return REL::RelocateMember<INFO_RUNTIME_DATA>(this, AE1799(0x8D8));
+ 				}
+ 			}
+ 			return REL::RelocateMember<INFO_RUNTIME_DATA>(this, 0x8D0, 0xFD0);
+@@ -804,7 +814,7 @@ namespace RE
+ 		{
+ 			if SKYRIM_REL_CONSTEXPR (REL::Module::IsAE()) {
+ 				if (REL::Module::get().version().compare(SKSE::RUNTIME_SSE_1_6_629) != std::strong_ordering::less) {
+-					return REL::RelocateMember<INFO_RUNTIME_DATA>(this, 0x8D8);
++					return REL::RelocateMember<INFO_RUNTIME_DATA>(this, AE1799(0x8D8));
+ 				}
+ 			}
+ 			return REL::RelocateMember<INFO_RUNTIME_DATA>(this, 0x8D0, 0xFD0);
+diff --git a/include/RE/S/SkyrimVM.h b/include/RE/S/SkyrimVM.h
+index 6633778a..b13247f9 100644
+--- a/include/RE/S/SkyrimVM.h
++++ b/include/RE/S/SkyrimVM.h
+@@ -19,6 +19,7 @@
+ #include "RE/S/SimpleAllocMemoryPagePolicy.h"
+ #include "RE/S/SkyrimScriptObjectBindPolicy.h"
+ #include "RE/S/SkyrimScriptStore.h"
++#include "SKSE/Version.h"
+ 
+ namespace RE
+ {
+@@ -215,8 +216,21 @@ namespace RE
+ 		void RelayEvent(VMHandle handle, BSFixedString* event, BSScript::IFunctionArguments* args, ISendEventFilter* optionalFilter);
+ 		void SendAndRelayEvent(VMHandle handle, BSFixedString* event, BSScript::IFunctionArguments* args, ISendEventFilter* optionalFilter);
+ 
++		// Skyrim 1.7.99 added two event sinks (TESAmiiboTouchEvent, TESAmiiboForcedStopDetectionEvent)
++		// at 0x180, moving impl and every member below it 0x10 further. The member list below is the
++		// pre-1.7.99 layout; use this accessor instead of reading impl directly.
++		[[nodiscard]] BSTSmartPointer<BSScript::IVirtualMachine>& GetImpl() noexcept
++		{
++			return REL::RelocateMemberIfNewer<BSTSmartPointer<BSScript::IVirtualMachine>>(SKSE::RUNTIME_SSE_1_7_99, this, 0x200, 0x210);
++		}
++
++		[[nodiscard]] const BSTSmartPointer<BSScript::IVirtualMachine>& GetImpl() const noexcept
++		{
++			return REL::RelocateMemberIfNewer<BSTSmartPointer<BSScript::IVirtualMachine>>(SKSE::RUNTIME_SSE_1_7_99, this, 0x200, 0x210);
++		}
++
+ 		// members
+-		BSTSmartPointer<BSScript::IVirtualMachine>                            impl;                         // 0200
++		BSTSmartPointer<BSScript::IVirtualMachine>                            impl;                         // 0200 (0210 on 1.7.99+, see GetImpl)
+ 		BSScript::IVMSaveLoadInterface*                                       saveLoadInterface;            // 0208
+ 		BSScript::IVMDebugInterface*                                          debugInterface;               // 0210
+ 		BSScript::SimpleAllocMemoryPagePolicy                                 memoryPagePolicy;             // 0218
+diff --git a/include/REL/Relocation.h b/include/REL/Relocation.h
+index dbc7941c..6d8d022d 100644
+--- a/include/REL/Relocation.h
++++ b/include/REL/Relocation.h
+@@ -215,6 +215,9 @@ namespace REL {
+ 
+             bool create(stl::zwstring a_name, std::size_t a_size);
+ 
++            // Maps a whole file read-only. a_size receives the file size in bytes.
++            bool create_from_file(stl::zwstring a_path, std::size_t &a_size);
++
+             void close();
+ 
+         private:
+@@ -724,15 +727,13 @@ namespace REL {
+             _instance._filename = _instance._filePath = a_filename.data();
+             _instance._version = a_version;
+             if (a_runtime == Runtime::Unknown) {
+-                switch (a_version[1]) {
+-                    case 4:
+-                        _instance._runtime = Runtime::VR;
+-                        break;
+-                    case 6:
+-                        _instance._runtime = Runtime::AE;
+-                        break;
+-                    default:
+-                        _instance._runtime = Runtime::SE;
++                // Minor version 4 = VR, 5 = SE, 6 and later = AE (Skyrim 1.7.99 bumped the minor version).
++                if (a_version[1] == 4) {
++                    _instance._runtime = Runtime::VR;
++                } else if (a_version[1] >= 6) {
++                    _instance._runtime = Runtime::AE;
++                } else {
++                    _instance._runtime = Runtime::SE;
+                 }
+             } else {
+                 _instance._runtime = a_runtime;
+@@ -889,15 +890,15 @@ namespace REL {
+             const auto version = get_file_version(_filePath);
+             if (version) {
+                 _version = *version;
+-                switch (_version[1]) {
+-                    case 4:
+-                        _runtime = Runtime::VR;
+-                        break;
+-                    case 6:
+-                        _runtime = Runtime::AE;
+-                        break;
+-                    default:
+-                        _runtime = Runtime::SE;
++                // Minor version 4 = VR, 5 = SE, 6 and later = AE. Skyrim 1.7.99 bumped the minor
++                // version, so this has to be a floor: an exact match would treat 1.7.x as SE and
++                // resolve every address with the wrong (SE) IDs.
++                if (_version[1] == 4) {
++                    _runtime = Runtime::VR;
++                } else if (_version[1] >= 6) {
++                    _runtime = Runtime::AE;
++                } else {
++                    _runtime = Runtime::SE;
+                 }
+                 return true;
+             }
+@@ -948,7 +949,8 @@ namespace REL {
+         enum class Format {
+             SSEv1,
+             SSEv2,
+-            VR
++            VR,
++            SSEv5  // Skyrim 1.7.99+: a flat array of 32-bit offsets indexed by ID
+         };
+ 
+         class Offset2ID {
+@@ -963,9 +965,18 @@ namespace REL {
+             explicit Offset2ID(ExecutionPolicy &&a_policy)  //
+             requires(std::is_execution_policy_v<std::decay_t<ExecutionPolicy>>)
+             {
+-                const std::span<const mapping_t> id2offset = IDDatabase::get()._id2offset;
+-                _offset2id.reserve(id2offset.size());
+-                _offset2id.insert(_offset2id.begin(), id2offset.begin(), id2offset.end());
++                const auto &db = IDDatabase::get();
++                if (db._loadedFormat == Format::SSEv5) {
++                    for (std::size_t id = 0; id < db._id2offsetDense.size(); ++id) {
++                        if (const auto offset = db._id2offsetDense[id]; offset != 0) {
++                            _offset2id.push_back(mapping_t{static_cast<std::uint64_t>(id), static_cast<std::uint64_t>(offset)});
++                        }
++                    }
++                } else {
++                    const std::span<const mapping_t> id2offset = db._id2offset;
++                    _offset2id.reserve(id2offset.size());
++                    _offset2id.insert(_offset2id.begin(), id2offset.begin(), id2offset.end());
++                }
+                 std::sort(
+                         a_policy,
+                         _offset2id.begin(),
+@@ -1056,6 +1067,18 @@ namespace REL {
+ #endif
+ 
+         [[nodiscard]] inline std::size_t id2offset(std::uint64_t a_id) const {
++            if (_loadedFormat == Format::SSEv5) {
++                if (a_id >= _id2offsetDense.size() || _id2offsetDense[a_id] == 0) {
++                    stl::report_and_fail(
++                            fmt::format(
++                                    "Failed to find the id within the address library: {}\n"
++                                    "This means this script extender plugin is incompatible with the address "
++                                    "library for this version of the game, and thus does not support it."sv,
++                                    a_id));
++                }
++                return static_cast<std::size_t>(_id2offsetDense[a_id]);
++            }
++
+             mapping_t elem{a_id, 0};
+             const auto it = std::lower_bound(
+                     _id2offset.begin(),
+@@ -1208,6 +1231,17 @@ namespace REL {
+ 
+         bool load_file(stl::zwstring a_filename, Version a_version, std::uint8_t a_formatVersion, bool a_failOnError) {
+             try {
++                // Skyrim 1.7.99+ ships Address Library format 5, which is not delta-encoded.
++                // Peek at the format number first so the old decoder never sees it.
++                std::int32_t fileFormat{0};
++                {
++                    istream_t probe(a_filename.data(), std::ios::in | std::ios::binary);
++                    probe.readin(fileFormat);
++                }
++                if (fileFormat == 5) {
++                    return load_v5(a_filename, a_version, a_failOnError);
++                }
++
+                 istream_t in(a_filename.data(), std::ios::in | std::ios::binary);
+                 header_t header;
+                 header.read(in, a_formatVersion);
+@@ -1375,9 +1409,16 @@ namespace REL {
+             return true;
+         }
+ 
++        // Format 5 layout: int32 format, uint32 version[4], char name[64], int32 pointerSize,
++        // int32 dataFormat, int32 offsetCount, then uint32 offsets[offsetCount] indexed by ID
++        // (0 = no address for that ID). Defined in Relocation.cpp.
++        bool load_v5(stl::zwstring a_filename, Version a_version, bool a_failOnError);
++
+         void clear() {
+             _mmap.close();
+             _id2offset = {};
++            _id2offsetDense = {};
++            _loadedFormat = Format::SSEv2;
+         }
+ 
+         static IDDatabase _instance;
+@@ -1385,6 +1426,8 @@ namespace REL {
+         static inline std::mutex _initLock;
+         detail::memory_map _mmap;
+         std::span<mapping_t> _id2offset;
++        std::span<const std::uint32_t> _id2offsetDense;  // format 5 only
++        Format _loadedFormat{Format::SSEv2};
+     };
+ 
+     class Offset {
+diff --git a/include/SKSE/Interfaces.h b/include/SKSE/Interfaces.h
+index fd957c71..0c4265fa 100644
+--- a/include/SKSE/Interfaces.h
++++ b/include/SKSE/Interfaces.h
+@@ -386,7 +386,10 @@ namespace SKSE
+ 		char                author[256] = {};
+ 		char                supportEmail[252] = {};
+ 		bool                noStructUse : 1 = false;
+-		std::uint8_t        padding1 : 7 = 0;
++		// SKSE 2.3+ refuses Address Library plugins that do not set this bit on Skyrim 1.7.99+,
++		// because the Address Library file format changed. This CommonLib reads the new format.
++		bool                addressLibraryV5 : 1 = true;
++		std::uint8_t        padding1 : 6 = 0;
+ 		std::uint8_t        padding2 = 0;
+ 		std::uint16_t       padding3 = 0;
+ 		bool                addressLibrary: 1 = false;
+@@ -429,10 +432,12 @@ namespace SKSE
+ 		SignatureScanning
+ 	};
+ 
++	// Written to SKSEPluginVersionData::versionIndependenceEx. Bit 0 = no struct use,
++	// bit 1 = compatible with the Address Library format used by Skyrim 1.7.99+.
+ 	enum class StructCompatibility : std::uint32_t
+ 	{
+-		Dependent = 0,
+-		Independent = 1
++		Dependent = 1 << 1,
++		Independent = (1 << 0) | (1 << 1)
+ 	};
+ 
+ 	struct PluginDeclaration
+diff --git a/include/SKSE/Version.h b/include/SKSE/Version.h
+index 903efe2b..589dee74 100644
+--- a/include/SKSE/Version.h
++++ b/include/SKSE/Version.h
+@@ -31,7 +31,9 @@ namespace SKSE
+ 	constexpr REL::Version RUNTIME_SSE_1_6_1130(1, 6, 1130, 0);
+ 	constexpr REL::Version RUNTIME_SSE_1_6_1170(1, 6, 1170, 0);
+ 	constexpr REL::Version RUNTIME_SSE_1_6_1179(1, 6, 1179, 0);
+-	constexpr auto         RUNTIME_SSE_LATEST_AE = RUNTIME_SSE_1_6_1170;
++	constexpr REL::Version RUNTIME_SSE_1_7_99(1, 7, 99, 0);
++	constexpr REL::Version RUNTIME_SSE_1_7_104(1, 7, 104, 0);
++	constexpr auto         RUNTIME_SSE_LATEST_AE = RUNTIME_SSE_1_7_104;
+ 	constexpr auto         RUNTIME_SSE_LATEST_SE = RUNTIME_SSE_1_5_97;
+ 	constexpr auto         RUNTIME_SSE_LATEST = RUNTIME_SSE_LATEST_AE;
+ 	constexpr auto         RUNTIME_SSE_LATEST_GOG = RUNTIME_SSE_1_6_1179;
+diff --git a/src/RE/B/BGSDefaultObjectManager.cpp b/src/RE/B/BGSDefaultObjectManager.cpp
+index 590ee1e9..d17df121 100644
+--- a/src/RE/B/BGSDefaultObjectManager.cpp
++++ b/src/RE/B/BGSDefaultObjectManager.cpp
+@@ -1,5 +1,7 @@
+ #include "RE/B/BGSDefaultObjectManager.h"
+ 
++#include "SKSE/Version.h"
++
+ using namespace REL;
+ 
+ namespace RE
+@@ -18,6 +20,14 @@ namespace RE
+ 				result = (0xFFFF0000 & a_idx) >> 16;
+ 			} else {
+ 				result = 0x0000FFFF & a_idx;
++				// 1.7.99 inserted one default object before index 188 and six more before 263.
++				if (Module::get().version() >= SKSE::RUNTIME_SSE_1_7_99) {
++					if (result >= 263) {
++						result += 6;
++					} else if (result >= 188) {
++						result += 1;
++					}
++				}
+ 			}
+ 			return result ? result : kInvalid;
+ 		}
+@@ -30,7 +40,7 @@ namespace RE
+ 		if (idx == kInvalid) {
+ 			return nullptr;
+ 		}
+-		return (&RelocateMember<bool>(this, 0xB80, 0xBA8))[idx] ?
++		return IsObjectInitialized(idx) ?
+                    &RelocateMember<TESForm**>(this, 0x20, 0x20)[idx] :
+                    nullptr;
+ 	}
+diff --git a/src/RE/P/PlayerCharacter.cpp b/src/RE/P/PlayerCharacter.cpp
+index 6a1d9ebb..5f391901 100644
+--- a/src/RE/P/PlayerCharacter.cpp
++++ b/src/RE/P/PlayerCharacter.cpp
+@@ -55,7 +55,7 @@ namespace RE
+         if SKYRIM_REL_CONSTEXPR (REL::Module::IsVR()) {
+             return REL::RelocateMember<ActorHandle>(this, 0, 0xE8C).get();
+         } else {
+-            return REL::RelocateMemberIfNewer<ActorHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x894, 0x89C).get();
++            return REL::RelocateMemberIfNewer<ActorHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x894, AE1799(0x89C)).get();
+         }
+ 	}
+ 
+@@ -78,7 +78,7 @@ namespace RE
+ 		if SKYRIM_REL_CONSTEXPR (Module::IsVR()) {
+ 			return nullptr;
+ 		} else {
+-			return REL::RelocateMemberIfNewer<ObjectRefHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x8C8, 0x8D0).get();
++			return REL::RelocateMemberIfNewer<ObjectRefHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x8C8, AE1799(0x8D0)).get();
+ 		}
+ 	}
+ 
+@@ -101,12 +101,12 @@ namespace RE
+ 		if SKYRIM_REL_VR_CONSTEXPR (REL::Module::IsVR()) {
+ 			return nullptr;
+ 		} else {
+-			auto* tryOverlayTintMasks = REL::RelocateMemberIfNewer<BSTArray<TintMask*>*>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB28, 0xB30);
++			auto* tryOverlayTintMasks = REL::RelocateMemberIfNewer<BSTArray<TintMask*>*>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB28, AE1799(0xB30));
+ 			if (!tryOverlayTintMasks) {
+ 				return nullptr;
+ 			}
+ 
+-			auto& tintMasksValue = REL::RelocateMemberIfNewer<BSTArray<TintMask*>>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB10, 0xB18);
++			auto& tintMasksValue = REL::RelocateMemberIfNewer<BSTArray<TintMask*>>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB10, AE1799(0xB18));
+ 			for (std::uint32_t i = 0; i < tintMasksValue.size(); ++i) {
+ 				if (tintMasksValue[i] == a_original) {
+ 					return i < tryOverlayTintMasks->size() ? (*tryOverlayTintMasks)[i] : nullptr;
+@@ -122,8 +122,8 @@ namespace RE
+ 		if SKYRIM_REL_VR_CONSTEXPR (REL::Module::IsVR()) {
+ 			return nullptr;
+ 		} else {
+-			auto* tryOverlayTintMasks = REL::RelocateMemberIfNewer<BSTArray<TintMask*>*>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB28, 0xB30);
+-			return tryOverlayTintMasks ? tryOverlayTintMasks : &REL::RelocateMemberIfNewer<BSTArray<TintMask*>>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB10, 0xB18);
++			auto* tryOverlayTintMasks = REL::RelocateMemberIfNewer<BSTArray<TintMask*>*>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB28, AE1799(0xB30));
++			return tryOverlayTintMasks ? tryOverlayTintMasks : &REL::RelocateMemberIfNewer<BSTArray<TintMask*>>(SKSE::RUNTIME_SSE_1_6_629, this, 0xB10, AE1799(0xB18));
+ 		}
+ 	}
+ 
+@@ -144,7 +144,7 @@ namespace RE
+             return static_cast<bool>(REL::RelocateMember<ActorHandle>(this, 0, 0xE8C));
+         }
+         else {
+-            return static_cast<bool>(REL::RelocateMemberIfNewer<ActorHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x894, 0x89C));
++            return static_cast<bool>(REL::RelocateMemberIfNewer<ActorHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x894, AE1799(0x89C)));
+         }
+ 	}
+ 
+@@ -153,7 +153,7 @@ namespace RE
+ 		if SKYRIM_REL_CONSTEXPR (Module::IsVR()) {
+ 			return false;
+ 		} else {
+-			return static_cast<bool>(REL::RelocateMemberIfNewer<ObjectRefHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x8C8, 0x8D0));
++			return static_cast<bool>(REL::RelocateMemberIfNewer<ObjectRefHandle>(SKSE::RUNTIME_SSE_1_6_629, this, 0x8C8, AE1799(0x8D0)));
+ 		}
+ 	}
+ 
+diff --git a/src/RE/S/Script.cpp b/src/RE/S/Script.cpp
+index 2cabe3b2..55ae877d 100644
+--- a/src/RE/S/Script.cpp
++++ b/src/RE/S/Script.cpp
+@@ -1,5 +1,7 @@
+ #include "RE/S/Script.h"
+ 
++#include "SKSE/Version.h"
++
+ #include "RE/M/MemoryManager.h"
+ 
+ namespace RE
+@@ -56,7 +58,8 @@ namespace RE
+ 	void Script::CompileAndRun_Impl(ScriptCompiler* a_compiler, COMPILER_NAME a_name, TESObjectREFR* a_targetRef)
+ 	{
+ 		using func_t = decltype(&Script::CompileAndRun_Impl);
+-		REL::Relocation<func_t> func{ Offset::Script::CompileAndRun };
++		// ID 21890 was dropped from the Address Library in 1.6.1130; the function is 441582 since then.
++		REL::Relocation<func_t> func{ RELOCATION_ID(21416, REL::Module::get().version() >= SKSE::RUNTIME_SSE_1_6_1130 ? 441582 : 21890) };
+ 		return func(this, a_compiler, a_name, a_targetRef);
+ 	}
+ }
+diff --git a/src/RE/S/SkyrimVM.cpp b/src/RE/S/SkyrimVM.cpp
+index 5227c42e..7e84b1b4 100644
+--- a/src/RE/S/SkyrimVM.cpp
++++ b/src/RE/S/SkyrimVM.cpp
+@@ -27,7 +27,7 @@ namespace RE
+ 	// Sends event to handle directly, then relays event to all reference aliases and magic effects attached to reference
+ 	void SkyrimVM::SendAndRelayEvent(VMHandle a_handle, BSFixedString* a_event, BSScript::IFunctionArguments* a_args, SkyrimVM::ISendEventFilter* a_optionalFilter)
+ 	{
+-		impl.get()->SendEvent(a_handle, *a_event, a_args);
++		GetImpl().get()->SendEvent(a_handle, *a_event, a_args);
+ 		RelayEvent(a_handle, a_event, a_args, a_optionalFilter);
+ 	}
+ }
+diff --git a/src/RE/T/TES.cpp b/src/RE/T/TES.cpp
+index 55961521..f4bcabfb 100644
+--- a/src/RE/T/TES.cpp
++++ b/src/RE/T/TES.cpp
+@@ -1,5 +1,7 @@
+ #include "RE/T/TES.h"
+ 
++#include "SKSE/Version.h"
++
+ #include "RE/B/bhkPickData.h"
+ #include "RE/G/GridCellArray.h"
+ #include "RE/N/NiAVObject.h"
+@@ -198,7 +200,8 @@ namespace RE
+ 	float TES::GetWaterHeight(const NiPoint3& a_pos, TESObjectCELL* a_cell) const
+ 	{
+ 		using func_t = decltype(&TES::GetWaterHeight);
+-		REL::Relocation<func_t> func{ RELOCATION_ID(13212, 13358) };
++		// 1.7.99 changed this function and the Address Library gave it a new ID.
++		REL::Relocation<func_t> func{ RELOCATION_ID(13212, REL::Module::get().version() >= SKSE::RUNTIME_SSE_1_7_99 ? 523463 : 13358) };
+ 		return func(this, a_pos, a_cell);
+ 	}
+ 
+diff --git a/src/RE/V/VirtualMachine.cpp b/src/RE/V/VirtualMachine.cpp
+index 17bbde5e..06b6050c 100644
+--- a/src/RE/V/VirtualMachine.cpp
++++ b/src/RE/V/VirtualMachine.cpp
+@@ -11,7 +11,7 @@ namespace RE
+ 			VirtualMachine* VirtualMachine::GetSingleton()
+ 			{
+ 				auto vm = SkyrimVM::GetSingleton();
+-				return vm ? static_cast<VirtualMachine*>(vm->impl.get()) : nullptr;
++				return vm ? static_cast<VirtualMachine*>(vm->GetImpl().get()) : nullptr;
+ 			}
+ 		}
+ 	}
+diff --git a/src/REL/Relocation.cpp b/src/REL/Relocation.cpp
+index 38093b1b..ce77fa31 100644
+--- a/src/REL/Relocation.cpp
++++ b/src/REL/Relocation.cpp
+@@ -116,6 +116,45 @@ namespace REL
+ 			return true;
+ 		}
+ 
++		bool memory_map::create_from_file(stl::zwstring a_path, std::size_t& a_size)
++		{
++			close();
++			a_size = 0;
++
++			const auto file = ::CreateFileW(
++				a_path.data(),
++				GENERIC_READ,
++				FILE_SHARE_READ,
++				nullptr,
++				OPEN_EXISTING,
++				FILE_ATTRIBUTE_READONLY,
++				nullptr);
++			if (file == INVALID_HANDLE_VALUE) {
++				return false;
++			}
++
++			::LARGE_INTEGER fileSize{};
++			if (!::GetFileSizeEx(file, &fileSize) || fileSize.QuadPart <= 0) {
++				::CloseHandle(file);
++				return false;
++			}
++
++			_mapping = ::CreateFileMappingW(file, nullptr, PAGE_READONLY, 0, 0, nullptr);
++			::CloseHandle(file);  // the mapping keeps its own reference to the file
++			if (!_mapping) {
++				return false;
++			}
++
++			_view = ::MapViewOfFile(_mapping, FILE_MAP_READ, 0, 0, 0);
++			if (!_view) {
++				close();
++				return false;
++			}
++
++			a_size = static_cast<std::size_t>(fileSize.QuadPart);
++			return true;
++		}
++
+ 		void memory_map::close()
+ 		{
+ 			if (_view) {
+@@ -175,4 +214,59 @@ namespace REL
+ 	}
+ 
+ 	IDDatabase IDDatabase::_instance;
++
++	bool IDDatabase::load_v5(stl::zwstring a_filename, Version a_version, bool a_failOnError)
++	{
++		constexpr std::size_t kVersionOffset = 0x04;      // uint32 version[4]
++		constexpr std::size_t kOffsetCountOffset = 0x5C;  // after name[64], pointerSize, dataFormat
++		constexpr std::size_t kHeaderSize = 0x60;
++
++		const auto filename = stl::utf16_to_utf8(a_filename).value_or("<unknown filename>"s);
++
++		std::size_t fileSize = 0;
++		if (!_mmap.create_from_file(a_filename, fileSize)) {
++			return stl::report_and_error(
++				fmt::format("Failed to open the address library file: {}"sv, filename),
++				a_failOnError);
++		}
++
++		const auto* bytes = static_cast<const std::uint8_t*>(_mmap.data());
++		if (fileSize < kHeaderSize) {
++			_mmap.close();
++			return stl::report_and_error(
++				fmt::format("The address library file is truncated: {}"sv, filename),
++				a_failOnError);
++		}
++
++		std::uint32_t fileVersion[4]{};
++		std::memcpy(fileVersion, bytes + kVersionOffset, sizeof(fileVersion));
++		const Version version{
++			static_cast<std::uint16_t>(fileVersion[0]),
++			static_cast<std::uint16_t>(fileVersion[1]),
++			static_cast<std::uint16_t>(fileVersion[2]),
++			static_cast<std::uint16_t>(fileVersion[3])
++		};
++		if (version != a_version) {
++			_mmap.close();
++			return stl::report_and_error("version mismatch"sv, a_failOnError);
++		}
++
++		std::int32_t offsetCount = 0;
++		std::memcpy(&offsetCount, bytes + kOffsetCountOffset, sizeof(offsetCount));
++		if (offsetCount <= 0 ||
++			fileSize < kHeaderSize + static_cast<std::size_t>(offsetCount) * sizeof(std::uint32_t)) {
++			_mmap.close();
++			return stl::report_and_error(
++				fmt::format("The address library file is truncated or corrupt: {}"sv, filename),
++				a_failOnError);
++		}
++
++		_id2offset = {};
++		_id2offsetDense = {
++			reinterpret_cast<const std::uint32_t*>(bytes + kHeaderSize),
++			static_cast<std::size_t>(offsetCount)
++		};
++		_loadedFormat = Format::SSEv5;
++		return true;
++	}
+ }

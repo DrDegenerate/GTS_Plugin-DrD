@@ -1,7 +1,7 @@
 {
   "name": "commonlibsse-ng-gts",
   "version-string": "3.6.2",
-  "port-version": 0,
+  "port-version": 1,
   "description": "A modified version of CharmedBaryon's version of CommonlibSSE-NG. Intended to be used by the GTS Mod",
   "homepage": "https://github.com/Arial6502/CommonLibSSE-NG-GTS/",
   "dependencies": [
