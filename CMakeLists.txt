@@ -75,7 +75,6 @@ FetchContent_Declare(
 	cmake_git_version_tracking                   
     GIT_REPOSITORY https://github.com/andrew-hardin/cmake-git-version-tracking.git
     GIT_TAG 6c0cb87edd029ddfb403a8e24577c144a03605a6
-    GIT_SHALLOW ON
 )
 FetchContent_MakeAvailable(cmake_git_version_tracking)
 
@@ -84,7 +83,6 @@ FetchContent_MakeAvailable(cmake_git_version_tracking)
 FetchContent_Declare(
     boost_ext_reflect
     GIT_REPOSITORY https://github.com/Arial6502/reflect/
-    GIT_SHALLOW ON
     GIT_TAG 653c94092fa8702dbc33ebf3b570190fb1a9dc28
 )
 FetchContent_MakeAvailable(boost_ext_reflect)
