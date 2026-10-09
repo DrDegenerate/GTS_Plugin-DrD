@@ -95,7 +95,8 @@ namespace Hooks {
 
         logger::info("Installing Scale Hooks...");
 
-        stl::write_call<AlterDashDistanceScale>(REL::RelocationID(31949, 32703, NULL), REL::VariantOffset(0x55A, 0x551, NULL));
+        //1.7.99+: the GetScale call moved to +0x562 (checked against the 1.7.104 executable).
+        stl::write_call<AlterDashDistanceScale>(REL::RelocationID(31949, 32703, NULL), REL::VariantOffset(0x55A, Internal::AEOffset(0x551, 0x562), NULL));
         stl::write_call<AlterMovementSpeedScale>(REL::RelocationID(37013, 37943, NULL), REL::VariantOffset(0x1A, 0x51, NULL));
         stl::write_call<AlterAnimSpeedScale>(REL::RelocationID(41683, 42768), REL::VariantOffset(0x31, 0x31, NULL));
 

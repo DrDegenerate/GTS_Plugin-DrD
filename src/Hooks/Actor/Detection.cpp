@@ -250,11 +250,12 @@ namespace Hooks {
 
 		logger::info("Installing Detection Hooks...");
 
-        stl::write_call<CalculateFootStepDetection>(REL::RelocationID(36758, 37774, NULL), REL::VariantOffset(0x2D4, 0x2D2, NULL));
+        //1.7.99+: Character::CalculateDetection grew; both call sites moved by 9 bytes (checked against the 1.7.104 executable).
+        stl::write_call<CalculateFootStepDetection>(REL::RelocationID(36758, 37774, NULL), REL::VariantOffset(0x2D4, Internal::AEOffset(0x2D2, 0x2DB), NULL));
         //stl::write_call<CalculateHeading1>(REL::RelocationID(36758, 37774, NULL), REL::VariantOffset(0x217, 0x217, NULL));
         //stl::write_call<CalculateHeading2>(REL::RelocationID(36758, 37774, NULL), REL::VariantOffset(0x92D, 0xA7F, NULL));
 		stl::write_call<DoDetectionJob_CalculateDetection>(REL::RelocationID(41659, 42742, NULL), REL::VariantOffset(0x526, 0x67B, NULL));
-        stl::write_call<Character_CalculateDetectionStrength>(REL::RelocationID(36758, 37774, NULL), REL::VariantOffset(0x5c7, 0x5b9, NULL));
+        stl::write_call<Character_CalculateDetectionStrength>(REL::RelocationID(36758, 37774, NULL), REL::VariantOffset(0x5c7, Internal::AEOffset(0x5B9, 0x5C2), NULL));
 
 	}
 }

@@ -82,7 +82,7 @@ namespace Hooks {
 	void Hook_MainUpdate::Install() {
 		logger::info("Installing Main Update Hooks...");
 		//Update happens at the end of the Main::Update loop right before a BSLightingShader subroutine.
-		//1.7.99 moved this call to +0xC38 (same site used by Precision, TDM and OAR).
+		//1.7.99 moved this call to +0xC38 (same site used by Precision, TDM and OAR; checked against the 1.7.104 executable).
 		stl::write_call<MainUpdatePost>(REL::RelocationID(35565, 36564, NULL), REL::VariantOffset(0x748, Internal::AEOffset(0xC26, 0xC38), NULL));
 	}
 
@@ -96,7 +96,7 @@ namespace Hooks {
 		}
 
 		const REL::RelocationID site{ 35565, 36564 };
-		//1.7.99 moved this call to +0x9EE (verified by HDT-SMP/FSMP against the 1.7.99 binary).
+		//1.7.99 moved this call to +0x9EE (same site HDT-SMP/FSMP uses; checked against the 1.7.104 executable).
 		const REL::VariantOffset offset{ 0x56D, Internal::AEOffset(0x9DC, 0x9EE), 0x0 };
 		const std::uintptr_t address = site.address() + offset.offset();
 
